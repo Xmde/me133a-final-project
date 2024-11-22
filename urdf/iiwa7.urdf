@@ -412,5 +412,52 @@
       <mechanicalReduction>1</mechanicalReduction>
     </actuator>
   </transmission>
+
+
+  <link name="lightsaber">
+    <visual>
+      <origin xyz="0 0 -0.045" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://me133a-final-project/meshes/iiwa7/visual/lightsaber.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+      <material name="Grey"/>
+    </visual>
+    <collision>
+      <origin xyz="0 0 -0.045" rpy="0 0 0"/>
+      <geometry>
+        <mesh filename="package://me133a-final-project/meshes/iiwa7/collision/lightsaber.stl" scale="0.001 0.001 0.001"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <link name="lightsaber_blade">
+    <visual>
+      <origin xyz="0 0 0.4" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.015" length="0.8"/>
+      </geometry>
+      <material name="LightsaberBlue">
+        <color rgba="0 0.529 1 1"/>
+      </material>
+    </visual>
+    <collision>
+      <origin xyz="0 0 0.4" rpy="0 0 0"/>
+      <geometry>
+        <cylinder radius="0.015" length="0.8"/>
+      </geometry>
+    </collision>
+  </link>
+
+  <joint name="lightsaber_joint" type="fixed">
+    <parent link="iiwa_link_ee"/>
+    <child link="lightsaber"/>
+    <origin xyz="0 0 0.045" rpy="0 0 0"/>
+  </joint>
+    <joint name="lightsaber_blade_joint" type="fixed">
+    <parent link="lightsaber"/>
+    <child link="lightsaber_blade"/>
+    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+  </joint>
+
 </robot>
 
