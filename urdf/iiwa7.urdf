@@ -414,16 +414,16 @@
   </transmission>
 
 
-  <link name="lightsaber">
+  <link name="lightsaber_base">
     <visual>
-      <origin xyz="0 0 -0.045" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <mesh filename="package://me133a-final-project/meshes/iiwa7/visual/lightsaber.stl" scale="0.001 0.001 0.001"/>
       </geometry>
       <material name="Grey"/>
     </visual>
     <collision>
-      <origin xyz="0 0 -0.045" rpy="0 0 0"/>
+      <origin xyz="0 0 0" rpy="0 0 0"/>
       <geometry>
         <mesh filename="package://me133a-final-project/meshes/iiwa7/collision/lightsaber.stl" scale="0.001 0.001 0.001"/>
       </geometry>
@@ -450,13 +450,13 @@
 
   <joint name="lightsaber_joint" type="fixed">
     <parent link="iiwa_link_ee"/>
-    <child link="lightsaber"/>
-    <origin xyz="0 0 0.045" rpy="0 0 0"/>
+    <child link="lightsaber_base"/>
+    <origin xyz="0 0 0.02" rpy="0 1.5707963267948966 0"/>
   </joint>
     <joint name="lightsaber_blade_joint" type="fixed">
-    <parent link="lightsaber"/>
+    <parent link="lightsaber_base"/>
     <child link="lightsaber_blade"/>
-    <origin xyz="0 0 0.15" rpy="0 0 0"/>
+    <origin xyz="0 0 0.2" rpy="0 0 0"/>
   </joint>
 
 </robot>
