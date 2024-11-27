@@ -28,10 +28,10 @@ class Trajectory():
         self.p0, self.R0, _, _ = self.chain.fkin(self.q0)
 
         self.qd = self.q0
-        self.lam = 10
+        self.lam = 20
+        self.blade_length = 0.6
         self.pos = self.get_balls_info()[0][:3] + self.get_balls_info()[0][3:]
-        self.r0 = self.dist_p_to_seg(self.pos, self.p0, self.p0 + self.R0 @ np.array([0, 0, 0.8]))
-        self.blade_length = 0.8
+        self.r0 = self.dist_p_to_seg(self.pos, self.p0, self.p0 + self.R0 @ np.array([0, 0, self.blade_length]))
 
         self.pos2 = self.get_balls_info()[1][:3] + self.get_balls_info()[1][3:]
 
@@ -59,30 +59,22 @@ class Trajectory():
     def JFull(self, q, x):
         ptip, Rtip, Jv, Jw = self.chain.fkin(q)
         L = self.blade_length
-        J3 = np.vstack((Rtip.T @ Jv, Rtip.T @ Jw))
-        J2 = np.array([
-            [1, 0, 0,  0, 0, 0],
-            [0, 1, 0,  0, 0, 0],
-            [0, 0, 1,  0, 0, 0],
-            [1, 0, 0,  0, L, 0],
-            [0, 1, 0, -L, 0, 0],
-            [0, 0, 1,  0, 0, 0]
-        ])
+        J2 = np.vstack((Rtip.T @ Jv, Rtip.T @ Jw))
         T0T = T_from_Rp(Rtip, ptip)
         xt = p_from_T(np.linalg.inv(T0T) @ T_from_Rp(Reye(), x))
-        dx = 0.00001
+        dx = 0.0001
         A = np.array([0, 0, 0])
         B = np.array([0, 0, L])
         dist = self.dist_p_to_seg(xt, A, B)
         J1 = np.array([
-            (self.dist_p_to_seg(xt, A + np.array([dx, 0, 0]), B) - dist) / dx,
-            (self.dist_p_to_seg(xt, A + np.array([0, dx, 0]), B) - dist) / dx,
-            (self.dist_p_to_seg(xt, A + np.array([0, 0, dx]), B) - dist) / dx,
+            (self.dist_p_to_seg(xt, A + np.array([dx, 0, 0]), B + np.array([dx, 0, 0])) - dist) / dx,
+            (self.dist_p_to_seg(xt, A + np.array([0, dx, 0]), B + np.array([0, dx, 0])) - dist) / dx,
+            (self.dist_p_to_seg(xt, A + np.array([0, 0, dx]), B + np.array([0, 0, dx])) - dist) / dx,
+            (self.dist_p_to_seg(xt, A, B + np.array([0, -dx, 0])) - dist) / dx,
             (self.dist_p_to_seg(xt, A, B + np.array([dx, 0, 0])) - dist) / dx,
-            (self.dist_p_to_seg(xt, A, B + np.array([0, dx, 0])) - dist) / dx,
-            (self.dist_p_to_seg(xt, A, B + np.array([0, 0, dx])) - dist) / dx
+            0
         ])
-        return J1 @ J2 @ J3
+        return J1 @ J2
 
         
 
@@ -107,8 +99,8 @@ class Trajectory():
         
         # self.qd = qd
 
-        if (t < 2):
-            rd, rdotd = goto(t, 2, self.r0, 0)
+        if (t < 5):
+            rd, rdotd = goto(t, 5, self.r0, 0)
         else:
             rd = 0
             rdotd = 0
@@ -116,8 +108,13 @@ class Trajectory():
         qdlast = self.qd
         J = self.JFull(qdlast, self.pos)
         ptip, Rtip, _, _ = self.chain.fkin(qdlast)
-        xr = rdotd + self.lam * (rd - self.dist_p_to_seg(self.pos, ptip, ptip + Rtip @ np.array([0, 0, 0.8])))
-        qddot = self.inv(J, 1) * xr + ((np.eye(7) - self.inv(J, 1) @ J) @ self.inv(self.JFull(qdlast, self.pos2), 1) * -0.5)
+        ptip = ptip + np.array([0, 0, 0.1])
+        dist_pos = self.dist_p_to_seg(self.pos, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
+        dist_pos2 = self.dist_p_to_seg(self.pos2, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
+
+        xr = rdotd + self.lam * (rd - dist_pos)
+        # qddot = self.inv(J, 2) * xr
+        qddot = self.inv(J, 1) * xr + ((np.eye(7) - self.inv(J, 1) @ J) @ self.inv(self.JFull(qdlast, self.pos2), 2) * -10 * dist_pos2)
         qd = qdlast + (qddot * dt)
 
         self.qd = qd
@@ -143,8 +140,8 @@ def main(args=None):
     # Initialize the generator node for 100Hz udpates, using the above
     # Trajectory class.
     balls = Balls('balls', UPDATE_RATE)
-    balls.add_ball(np.array([0.3, 1, 0.3]), np.array([0, 0, 0]))
     balls.add_ball(np.array([0.3, 0.5, 0.3]), np.array([0, 0, 0]))
+    balls.add_ball(np.array([0.4, 0.5, 0.4]), np.array([0, 0, 0]))
     SPIN_QUEUE.append(balls)
 
     generator = GeneratorNode('generator', UPDATE_RATE, Trajectory)
