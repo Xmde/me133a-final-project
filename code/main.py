@@ -28,7 +28,7 @@ class Trajectory():
         self.p0, self.R0, _, _ = self.chain.fkin(self.q0)
 
         self.qd = self.q0
-        self.lam = 50
+        self.lam = 30
         self.blade_length = 0.7
         self.blade_guard_offset = 0.05
         self.init_balls_info = self.get_balls_info()
@@ -39,6 +39,7 @@ class Trajectory():
         # Return a list of joint names FOR THE EXPECTED URDF!
         return ['iiwa_joint_1', 'iiwa_joint_2', 'iiwa_joint_3', 'iiwa_joint_4', 'iiwa_joint_5', 'iiwa_joint_6', 'iiwa_joint_7']
 
+    # We use weighted inverse becuase there seems to be a lot of singularities.
     @staticmethod
     def inv(J, lam):
         return J.T @ np.linalg.inv(J @ J.T + lam**2 * np.eye(J.shape[0]))
@@ -48,6 +49,7 @@ class Trajectory():
         balls = Balls.get_balls()
         return [np.concatenate((ball['p'], ball['v'])) for ball in balls]
 
+    # This is the distance between a point and a line segment.
     @staticmethod
     def dist_p_to_seg(P, A, B):
         AP = P - A
@@ -55,6 +57,10 @@ class Trajectory():
         t = max(0, min(1, np.dot(AP, AB) / np.dot(AB, AB)))
         return np.linalg.norm(P - (A + t * AB))
 
+    # This makes the full Jacobian for the task space.
+    # The main task space is the distance from the blade to the ball.
+    # We just compute this numerically by seeing how the distance changes for
+    # small changes in the end effector position.
     def JFull(self, q, x):
         ptip, Rtip, Jv, Jw = self.chain.fkin(q)
         L = self.blade_length
@@ -82,8 +88,9 @@ class Trajectory():
         pos = self.init_balls_info[0][:3] + 5 * self.init_balls_info[0][3:]
         pos2 = self.init_balls_info[1][:3] + self.init_balls_info[1][3:]
 
-        if (t < 2):
-            rd, rdotd = goto(t, 2, self.r0, 0)
+        # We just initialy go to the first ball (distance is 0).
+        if (t < 5):
+            rd, rdotd = goto(t, 5, self.r0, 0)
         else:
             rd = 0
             rdotd = 0
@@ -95,6 +102,8 @@ class Trajectory():
         dist_pos = self.dist_p_to_seg(pos, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
         dist_pos2 = self.dist_p_to_seg(pos2, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
         xr = rdotd + self.lam * (rd - dist_pos)
+
+        # The primary task reduces the distance between the blade and the first ball. The secondary task reduces the distance between the blade and the second ball.
         qddot = self.inv(Jp, 1) * xr + ((np.eye(7) - self.inv(Jp, 1) @ Jp) @ self.inv(self.JFull(qdlast, pos2), 2) * -10 * dist_pos2)
         qd = qdlast + (qddot * dt)
 
@@ -121,8 +130,7 @@ def main(args=None):
     # Initialize the generator node for 100Hz udpates, using the above
     # Trajectory class.
     balls = Balls('balls', UPDATE_RATE)
-    # balls.add_ball(np.array([-0.1, 0.5 , 0.3]), np.array([0, 0, 0]))
-    # balls.add_ball(np.array([0.4, 0.45, 0.4]), np.array([0, 0, 0]))
+    # Makes two balls and puts them randomly in the scene.
     balls.add_ball(np.array([np.random.uniform(-.5, .5), 0.5, np.random.uniform(0, .5)]), np.array([0, 0, 0]))
     balls.add_ball(np.array([np.random.uniform(-.5, .5), 0.5, np.random.uniform(0, .5)]), np.array([0, 0, 0]))
     SPIN_QUEUE.append(balls)
