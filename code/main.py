@@ -32,7 +32,7 @@ class Trajectory():
         self.blade_length = 0.7
         self.blade_guard_offset = 0.05
         self.init_balls_info = self.get_balls_info()
-        self.r0 = self.dist_p_to_seg(self.init_balls_info[0][:3] + 5 * self.init_balls_info[0][3:], self.p0, self.p0 + self.R0 @ np.array([0, 0, self.blade_length]))
+        self.r0 = self.dist_p_to_seg(self.init_balls_info[0][:3] + 5 * self.init_balls_info[0][3:], self.p0 + self.R0 @ np.array([0, 0, self.blade_guard_offset]), self.p0 + self.R0 @ np.array([0, 0, self.blade_length]))
 
     # Declare the joint names.
     def jointnames(self):
@@ -93,8 +93,9 @@ class Trajectory():
         ptip, Rtip, _, _ = self.chain.fkin(qdlast)
         ptip = ptip + Rtip @ np.array([0, 0, self.blade_guard_offset])
         dist_pos = self.dist_p_to_seg(pos, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
+        dist_pos2 = self.dist_p_to_seg(pos2, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
         xr = rdotd + self.lam * (rd - dist_pos)
-        qddot = self.inv(Jp, 1) * xr + ((np.eye(7) - self.inv(Jp, 1) @ Jp) @ self.inv(self.JFull(qdlast, pos2), 2) * -1)
+        qddot = self.inv(Jp, 1) * xr + ((np.eye(7) - self.inv(Jp, 1) @ Jp) @ self.inv(self.JFull(qdlast, pos2), 1) * -10 * dist_pos2)
         qd = qdlast + (qddot * dt)
 
         self.qd = qd
@@ -120,8 +121,8 @@ def main(args=None):
     # Initialize the generator node for 100Hz udpates, using the above
     # Trajectory class.
     balls = Balls('balls', UPDATE_RATE)
-    balls.add_ball(np.array([0.3, 0.5 , 0.3]), np.array([0, 0, 0]))
-    balls.add_ball(np.array([0.4, 0.5, 0.4]), np.array([0, 0, 0]))
+    balls.add_ball(np.array([-0.1, 0.5 , 0.3]), np.array([0, 0, 0]))
+    balls.add_ball(np.array([0.4, 0.45, 0.4]), np.array([0, 0, 0]))
     SPIN_QUEUE.append(balls)
 
     generator = GeneratorNode('generator', UPDATE_RATE, Trajectory)
