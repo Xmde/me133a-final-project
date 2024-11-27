@@ -28,7 +28,7 @@ class Trajectory():
         self.p0, self.R0, _, _ = self.chain.fkin(self.q0)
 
         self.qd = self.q0
-        self.lam = 20
+        self.lam = 50
         self.blade_length = 0.7
         self.blade_guard_offset = 0.05
         self.init_balls_info = self.get_balls_info()
@@ -95,7 +95,7 @@ class Trajectory():
         dist_pos = self.dist_p_to_seg(pos, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
         dist_pos2 = self.dist_p_to_seg(pos2, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
         xr = rdotd + self.lam * (rd - dist_pos)
-        qddot = self.inv(Jp, 1) * xr + ((np.eye(7) - self.inv(Jp, 1) @ Jp) @ self.inv(self.JFull(qdlast, pos2), 1) * -10 * dist_pos2)
+        qddot = self.inv(Jp, 1) * xr + ((np.eye(7) - self.inv(Jp, 1) @ Jp) @ self.inv(self.JFull(qdlast, pos2), 2) * -10 * dist_pos2)
         qd = qdlast + (qddot * dt)
 
         self.qd = qd
@@ -121,8 +121,10 @@ def main(args=None):
     # Initialize the generator node for 100Hz udpates, using the above
     # Trajectory class.
     balls = Balls('balls', UPDATE_RATE)
-    balls.add_ball(np.array([-0.1, 0.5 , 0.3]), np.array([0, 0, 0]))
-    balls.add_ball(np.array([0.4, 0.45, 0.4]), np.array([0, 0, 0]))
+    # balls.add_ball(np.array([-0.1, 0.5 , 0.3]), np.array([0, 0, 0]))
+    # balls.add_ball(np.array([0.4, 0.45, 0.4]), np.array([0, 0, 0]))
+    balls.add_ball(np.array([np.random.uniform(-.5, .5), 0.5, np.random.uniform(0, .5)]), np.array([0, 0, 0]))
+    balls.add_ball(np.array([np.random.uniform(-.5, .5), 0.5, np.random.uniform(0, .5)]), np.array([0, 0, 0]))
     SPIN_QUEUE.append(balls)
 
     generator = GeneratorNode('generator', UPDATE_RATE, Trajectory)
