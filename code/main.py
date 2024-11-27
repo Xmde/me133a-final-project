@@ -29,7 +29,7 @@ class Trajectory():
 
         self.qd = self.q0
         self.lam = 20
-        self.blade_length = 0.6
+        self.blade_length = 0.7
         self.pos = self.get_balls_info()[0][:3] + self.get_balls_info()[0][3:]
         self.r0 = self.dist_p_to_seg(self.pos, self.p0, self.p0 + self.R0 @ np.array([0, 0, self.blade_length]))
 
@@ -80,25 +80,6 @@ class Trajectory():
 
     # Evaluate at the given time.  This was last called (dt) ago.
     def evaluate(self, t, dt):
-        # if (t < 1):
-        #     pd, vd = goto(t, 1, self.p0, self.pos)
-        #     Rd = Reye()
-        #     wd = pzero()
-        # else:
-        #     pd = self.get_balls_info()[0][:3]
-        #     vd = self.get_balls_info()[0][3:]
-        #     Rd = Reye()
-        #     wd = pzero()
-
-        # qdlast = self.qd
-        
-        # ptip, Rtip, Jv, Jw = self.chain.fkin(qdlast)
-        # xr = np.concatenate((vd, wd)) + self.lam * np.concatenate((ep(pd, ptip), eR(Rd, Rtip)))
-        # qddot = self.inv(np.vstack((Jv, Jw)), 0.1) @ xr
-        # qd = qdlast + (qddot * dt)
-        
-        # self.qd = qd
-
         if (t < 5):
             rd, rdotd = goto(t, 5, self.r0, 0)
         else:
@@ -108,7 +89,7 @@ class Trajectory():
         qdlast = self.qd
         J = self.JFull(qdlast, self.pos)
         ptip, Rtip, _, _ = self.chain.fkin(qdlast)
-        ptip = ptip + np.array([0, 0, 0.1])
+        ptip = ptip + Rtip @ np.array([0, 0, 0.05])
         dist_pos = self.dist_p_to_seg(self.pos, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
         dist_pos2 = self.dist_p_to_seg(self.pos2, ptip, ptip + Rtip @ np.array([0, 0, self.blade_length]))
 
@@ -119,9 +100,9 @@ class Trajectory():
 
         self.qd = qd
 
-        pd = pzero()
+        pd = ptip
         vd = pzero()
-        Rd = Reye()
+        Rd = Rtip
         wd = pzero()
         
         # Return the desired joint and task (position/orientation) pos/vel.
