@@ -31,6 +31,23 @@ class Balls(Node):
     @staticmethod
     def get_balls():
         return Balls.balls
+    
+    @staticmethod
+    def gen_random_posvel(offset):
+        end_pos = np.array([np.random.uniform(-0.75, 0.75), 0, np.random.uniform(0.25, 1.0)])
+        vel = np.array([np.random.uniform(-0.5, 0.5), -0.3, np.random.uniform(-0.05, 0.05)])
+        start_pos = end_pos - (offset * vel)
+        return np.concatenate((start_pos, vel))
+        
+    
+    @staticmethod
+    # Moves the first ball to the end and then moves it to pos with vel
+    def cycle_first_ball(posvel):
+        ball = Balls.balls.pop(0)
+        ball['p'] = posvel[:3]
+        ball['v'] = posvel[3:]
+        Balls.balls.append(ball)
+        
 
     def __init__(self, name, rate):
         # Initialize the node, naming it as specified
@@ -43,7 +60,7 @@ class Balls(Node):
             MarkerArray, '/visualization_marker_array', quality)
 
         # Initialize the ball position, velocity, set the acceleration.
-        self.radius = 0.01
+        self.radius = 0.05
 
         # Create the marker array message.
         self.markerarray = MarkerArray(markers = [])
@@ -59,10 +76,10 @@ class Balls(Node):
         self.get_logger().info("Running with dt of %f seconds (%fHz)" %
                                (self.dt, rate))
 
-    def add_ball(self, p, v):
+    def add_ball(self, pv):
         ball = {
-            'p': p,
-            'v': v,
+            'p': pv[:3],
+            'v': pv[3:],
             'marker': Marker()
         }
         ball['marker'].header.frame_id  = "world"
@@ -72,7 +89,7 @@ class Balls(Node):
         ball['marker'].id               = len(self.markerarray.markers) + 1
         ball['marker'].type             = Marker.SPHERE
         ball['marker'].pose.orientation = Quaternion()
-        ball['marker'].pose.position    = Point_from_p(p)
+        ball['marker'].pose.position    = Point_from_p(pv[:3])
         ball['marker'].scale            = Vector3(x = 2 * self.radius, y = 2 * self.radius, z = 2 * self.radius)
         ball['marker'].color            = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)
         self.markerarray.markers.append(ball['marker'])

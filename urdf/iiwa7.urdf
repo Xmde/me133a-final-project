@@ -430,7 +430,7 @@
     </collision>
   </link>
 
-  <link name="lightsaber_blade">
+  <link name="lightsaber_blade_base">
     <visual>
       <origin xyz="0 0 0.4" rpy="0 0 0"/>
       <geometry>
@@ -448,15 +448,57 @@
     </collision>
   </link>
 
+  <link name="lightsaber_blade">
+  </link>
+
+  <link name="lightsaber_blade_pan">
+  </link>
+
+  <link name="lightsaber_blade_tilt">
+  </link>
+
+  <link name="lightsaber_blade_end">
+  </link>
+
   <joint name="lightsaber_joint" type="fixed">
     <parent link="iiwa_link_ee"/>
     <child link="lightsaber_base"/>
     <origin xyz="0 0 0.02" rpy="0 1.5707963267948966 0"/>
   </joint>
-    <joint name="lightsaber_blade_joint" type="fixed">
+  <joint name="lightsaber_blade_joint" type="fixed">
     <parent link="lightsaber_base"/>
-    <child link="lightsaber_blade"/>
+    <child link="lightsaber_blade_base"/>
     <origin xyz="0 0 0.2" rpy="0 0 0"/>
+  </joint>
+
+  <joint name="light_saber_blade_len" type="prismatic">
+    <parent link="lightsaber_blade_base"/>
+    <child  link="lightsaber_blade"/>
+    <limit effort="1000.0" lower="0.0" upper="0.8" velocity="0.5"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis   xyz="0 0 1"/>
+  </joint>
+
+  <joint name="light_saber_blade_pan" type="continuous">
+    <parent link="lightsaber_blade"/>
+    <child  link="lightsaber_blade_pan"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis   xyz="0 0 1"/>
+  </joint>
+
+  <joint name="light_saber_blade_tilt" type="continuous">
+    <parent link="lightsaber_blade_pan"/>
+    <child  link="lightsaber_blade_tilt"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis   xyz="0 1 0"/>
+  </joint>
+
+  <joint name="light_saber_blade_end" type="prismatic">
+    <parent link="lightsaber_blade_tilt"/>
+    <child  link="lightsaber_blade_end"/>
+    <limit effort="1000.0" lower="0.0" upper="10.0" velocity="0.5"/>
+    <origin xyz="0 0 0" rpy="0 0 0"/>
+    <axis   xyz="0 0 1"/>
   </joint>
 
 </robot>
