@@ -1,15 +1,16 @@
 import rclpy, time
 import numpy as np
+import traceback
 
 from math import pi, sin, cos, acos, atan2, sqrt, fmod, exp
 
 # Grab the utilities
-from code.utils.GeneratorNode      import GeneratorNode
-from code.utils.TransformHelpers   import *
-from code.utils.TrajectoryUtils    import *
+from code.utils.GeneratorNode import GeneratorNode
+from code.utils.TransformHelpers import *
+from code.utils.TrajectoryUtils import *
 
 # Grab the general fkin from HW6 P1.
-from code.utils.KinematicChain     import KinematicChain
+from code.utils.KinematicChain import KinematicChain
 
 # Import the ball
 from code.Balls import Balls
@@ -18,15 +19,20 @@ from code.Balls import Balls
 #
 #   Trajectory Class
 #
-class Trajectory():
+class Trajectory:
     # Initialization.
     def __init__(self, node):
-        self.node = node 
-        # Set up the kinematic chain object.
-        self.full_chain = KinematicChain(node, 'world', 'lightsaber_blade_end', self.jointnames())
-        self.blade_rot_chain = KinematicChain(node, 'world', 'lightsaber_blade_tilt', self.jointnames()[:-1])
+        self.node = node
 
-        self.q0 = np.array([0, 0, 0, 0, 0, 0, 0, 0.4, np.pi/2, np.pi/2, 0])
+        # Set up the kinematic chain object.
+        self.full_chain = KinematicChain(
+            node, "world", "lightsaber_blade_end", self.jointnames()
+        )
+        self.blade_rot_chain = KinematicChain(
+            node, "world", "lightsaber_blade_tilt", self.jointnames()[:-1]
+        )
+
+        self.q0 = np.array([0, 0, 0, 0, 0, 0, 0, 0.4, np.pi / 2, np.pi / 2, 0])
         self.p0, self.R0, _, _ = self.full_chain.fkin(self.q0)
 
         self.qd = self.q0.copy()
@@ -35,90 +41,198 @@ class Trajectory():
         self.lam_perp = 20
         self.blade_len_max = 0.75
         self.blade_len_min = 0.05
-        
+
         self.tracking = False
         self.traj_start = 0
         self.traj_time = 1.5
         self.traj_p0 = self.p0
         self.traj_pf = None
 
-    # Declare the joint names.
     def jointnames(self):
-        # Return a list of joint names FOR THE EXPECTED URDF!
-        return ['iiwa_joint_1', 'iiwa_joint_2', 'iiwa_joint_3', 'iiwa_joint_4', 'iiwa_joint_5', 'iiwa_joint_6', 'iiwa_joint_7', 'light_saber_blade_len', 'light_saber_blade_pan', 'light_saber_blade_tilt', 'light_saber_blade_end']
+        """
+        Declare the joint names.
 
-    # We use weighted inverse becuase there seems to be a lot of singularities.
+        Returns:
+            list: A list of joint names for the expected URDF.
+        """
+        return [
+            "iiwa_joint_1",
+            "iiwa_joint_2",
+            "iiwa_joint_3",
+            "iiwa_joint_4",
+            "iiwa_joint_5",
+            "iiwa_joint_6",
+            "iiwa_joint_7",
+            "light_saber_blade_len",
+            "light_saber_blade_pan",
+            "light_saber_blade_tilt",
+            "light_saber_blade_end",
+        ]
+
     @staticmethod
     def winv(J, W):
+        """
+        Compute the weighted pseudoinverse of a matrix.
+
+        Args:
+            J (np.ndarray): Jacobian matrix.
+            W (np.ndarray): Weighting matrix.
+
+        Returns:
+            np.ndarray: Weighted pseudoinverse of J.
+        """
         return W @ np.linalg.pinv(J @ W)
-    
-    @staticmethod
-    def get_balls_info():
-        balls = Balls.get_balls()
-        return [np.concatenate((ball['p'], ball['v'])) for ball in balls]
-    
 
     @staticmethod
-    def compute_angle(vec):
-        cos_theta = np.cos(np.arcsin(vec[2]))
+    def get_balls_info():
+        """
+        Get information about the balls in the scene.
+
+        Returns:
+            list: List of position and velocity vectors for each ball.
+        """
+        balls = Balls.get_balls()
+        return [np.concatenate((ball["p"], ball["v"])) for ball in balls]
+
+    def compute_angle(self, vec):
+        """
+        Compute the pan and tilt angles required to align the blade with a given vector.
+
+        Args:
+            vec (np.ndarray): A 3D vector.
+
+        Returns:
+            np.ndarray: Pan and tilt angles.
+        """
+        # Ensure vec is a unit vector
+        vec_norm = np.linalg.norm(vec)
+        if np.isclose(vec_norm, 0):
+            self.node.get_logger().info(
+                "Input vector has zero length in compute_angle."
+            )
+            vec = np.array([0, 0, 1])  # Default to a unit vector along Z-axis
+            vec_norm = 1.0
+        vec = vec / vec_norm
+
+        sin_theta = vec[2]
+        cos_theta = np.sqrt(1 - sin_theta**2)
         # Prevent division by zero
         if np.isclose(cos_theta, 0):
             cos_theta = np.finfo(float).eps
         pan = np.arctan2(-vec[0] / cos_theta, vec[1] / cos_theta)
-        tilt = np.arcsin(vec[2])
+        tilt = np.arcsin(sin_theta)
         return np.array([pan, tilt])
-    
+
     # Evaluate at the given time.  This was last called (dt) ago.
     def evaluate(self, t, dt):
-        try: 
-            vel = self.get_balls_info()[0][3:]
-            ballpos = self.get_balls_info()[0][:3]
-            pos = ballpos
-            if (vel == np.zeros(3)).all():
-                vel = np.array([0, -1, 0])
-            dangle = self.compute_angle(vel/-np.linalg.norm(vel))
+        """
+        Evaluate the trajectory at a given time.
+
+        Args:
+            t (float): Current time.
+            dt (float): Time step.
+
+        Returns:
+            tuple: Desired joint positions and velocities, task space positions and velocities.
+        """
+        try:
+            # Get ball information
+            ball_info = self.get_balls_info()[0]
+            ball_pos = ball_info[:3]
+            ball_vel = ball_info[3:]
+            ball_vel_norm = np.linalg.norm(ball_vel)
+
+            if np.isclose(ball_vel_norm, 0):
+                self.node.get_logger().info(
+                    "Ball velocity norm is zero, setting default velocity."
+                )
+                ball_vel = np.array([0, -1, 0])
+                ball_vel_norm = np.linalg.norm(ball_vel)
+
+            # Desired angles to align the blade
+            dir_normalized = ball_vel / -ball_vel_norm
+            dangle = self.compute_angle(dir_normalized)
+
             W = np.diag([1, 1, 1, 1, 1, 1, 1, 0.5, 5, 5, 10])
-            
-            if(not self.tracking):
-                if (self.traj_pf is None):
-                    self.traj_pf = pos + vel * self.traj_time
-                pos, vel = spline(t - self.traj_start, self.traj_time, self.traj_p0, self.traj_pf, pzero(), vel)
-                if (t - self.traj_start >= self.traj_time):
+
+            if not self.tracking:
+                if self.traj_pf is None:
+                    self.traj_pf = ball_pos + ball_vel * self.traj_time
+                pos, vel = spline(
+                    t - self.traj_start,
+                    self.traj_time,
+                    self.traj_p0,
+                    self.traj_pf,
+                    pzero(),
+                    ball_vel,
+                )
+                if t - self.traj_start >= self.traj_time:
                     self.tracking = True
-            
-            qdlast = self.qd
-            _, Rrot, _, Jwrot = self.blade_rot_chain.fkin(qdlast[:-1])
-            Jwrot = np.array([[0, 0, 1], [1, 0, 0]]) @ np.hstack((Jwrot, np.zeros((3, 1))))
-            ptip, Rtip, Jvtip, _ = self.full_chain.fkin(qdlast)
-            if (qdlast[7] > self.blade_len_max):
+            else:
+                pos = ball_pos
+                vel = ball_vel
+
+            qd_last = self.qd.copy()
+
+            # Forward kinematics
+            _, Rrot, _, Jwrot = self.blade_rot_chain.fkin(qd_last[:-1])
+            Jwrot = np.array([[0, 0, 1], [1, 0, 0]]) @ np.hstack(
+                (Jwrot, np.zeros((3, 1)))
+            )
+            ptip, Rtip, Jvtip, _ = self.full_chain.fkin(qd_last)
+
+            # Enforce blade length limits
+            if qd_last[7] > self.blade_len_max or qd_last[7] < self.blade_len_min:
                 Jvtip[:, 7] = np.zeros(3)
-                qdlast[7] = self.blade_len_max
-            if (qdlast[7] < self.blade_len_min):
-                Jvtip[:, 7] = np.zeros(3)
-                qdlast[7] = self.blade_len_min
-            qddot = self.winv(Jwrot, W) @ (self.angle_lam * (dangle - self.compute_angle(Rrot[:, 2])))
-            qddot += (np.eye(11) - self.winv(Jwrot, W) @ Jwrot) @ (self.winv(Jvtip, W) @ (vel + (self.lam * ep(pos, ptip))))
-            qddot += (np.eye(11) - self.winv(Jwrot, W) @ Jwrot) @ (np.eye(11) - self.winv(Jvtip, W) @ Jvtip) @ (self.lam_perp * np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, np.pi/2 - qdlast[9], 0]))
-            self.qd = qdlast + qddot * dt
+                qd_last[7] = np.clip(qd_last[7], self.blade_len_min, self.blade_len_max)
+
+            # Control laws
+            angle_error = dangle - self.compute_angle(Rrot[:, 2])
+            qddot = self.winv(Jwrot, W) @ (self.angle_lam * angle_error)
+
+            null_space_projection = np.eye(11) - self.winv(Jwrot, W) @ Jwrot
+            position_error = vel + (self.lam * ep(pos, ptip))
+            qddot += null_space_projection @ (self.winv(Jvtip, W) @ position_error)
+
+            # Enforce secondary objectives
+            perp_error = self.lam_perp * np.array(
+                [0, 0, 0, 0, 0, 0, 0, 0, 0, np.pi / 2 - qd_last[9], 0]
+            )
+            qddot += (
+                null_space_projection
+                @ (np.eye(11) - self.winv(Jvtip, W) @ Jvtip)
+                @ perp_error
+            )
+
+            # Update joint positions
+            self.qd = qd_last + qddot * dt
             self.qd[7] = np.clip(self.qd[7], self.blade_len_min, self.blade_len_max)
-            
-            if (self.qd[-1] < 0 and np.linalg.norm(ep(ballpos, ptip)) < 0.1):
+
+            collision_distance = np.linalg.norm(ep(ball_pos, ptip))
+            self.node.get_logger().debug(f"Collision distance: {collision_distance}")
+
+            # Check for collision and reset trajectory
+            if self.qd[-1] < 0 and collision_distance < 0.1:
+                self.node.get_logger().info(
+                    "Collision detected. Cycling and resetting trajectory."
+                )
                 Balls.cycle_first_ball(Balls.gen_random_posvel(10))
                 self.tracking = False
                 self.traj_start = t
                 self.traj_p0 = ptip
                 self.traj_pf = None
-            
+
             pd = ptip
             vd = pzero()
             Rd = Rtip
             wd = pzero()
-            
-            # Return the desired joint and task (position/orientation) pos/vel.
+
+            # Return the desired joint and task space positions and velocities
             return (self.qd, qddot, pd, vd, Rd, wd)
         except Exception as e:
-            self.node.get_logger().error(f"Error in evaluating trajectory: {e}")
-            return None  
+            self.node.get_logger().info(f"Error in evaluating trajectory: {e}")
+            traceback.print_exc()
+            return None
 
 
 #
@@ -132,7 +246,7 @@ def main(args=None):
 
     # Initialize the generator node for 100Hz udpates, using the above
     # Trajectory class.
-    balls = Balls('balls', UPDATE_RATE)
+    balls = Balls("balls", UPDATE_RATE)
     # Makes two balls and puts them randomly in the scene.
     balls.add_ball(Balls.gen_random_posvel(2.5))
     balls.add_ball(Balls.gen_random_posvel(5))
@@ -140,24 +254,31 @@ def main(args=None):
     balls.add_ball(Balls.gen_random_posvel(10))
     SPIN_QUEUE.append(balls)
 
-    generator = GeneratorNode('generator', UPDATE_RATE, Trajectory)
+    generator = GeneratorNode("generator", UPDATE_RATE, Trajectory)
     SPIN_QUEUE.append(generator)
 
     while SPIN_QUEUE:
         start_time = time.time()
         for node in SPIN_QUEUE:
-            rclpy.spin_once(node, timeout_sec=1/(UPDATE_RATE))
-        SPIN_QUEUE = [node for node in SPIN_QUEUE if not hasattr(node, 'future') or not node.future.done()]
-        timeout = max(0, 1/UPDATE_RATE - (time.time() - start_time))
+            rclpy.spin_once(node, timeout_sec=1 / (UPDATE_RATE))
+        SPIN_QUEUE = [
+            node
+            for node in SPIN_QUEUE
+            if not hasattr(node, "future") or not node.future.done()
+        ]
+        timeout = max(0, 1 / UPDATE_RATE - (time.time() - start_time))
         if timeout > 0:
             time.sleep(timeout)
         else:
-            print(f"Warning: loop took longer than {1000/UPDATE_RATE} ms, took {(time.time() - start_time) * 1000:.3f} ms")
+            print(
+                f"Warning: loop took longer than {1000/UPDATE_RATE} ms, took {(time.time() - start_time) * 1000:.3f} ms"
+            )
 
     # Shutdown the node and ROS.
     generator.shutdown()
     balls.shutdown()
     rclpy.shutdown()
+
 
 if __name__ == "__main__":
     main()
