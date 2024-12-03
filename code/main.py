@@ -92,6 +92,7 @@ class Trajectory():
         qddot += (np.eye(11) - self.winv(Jwrot, W) @ Jwrot) @ (self.winv(Jvtip, W) @ (vel + (self.lam * ep(pos, ptip))))
         qddot += (np.eye(11) - self.winv(Jwrot, W) @ Jwrot) @ (np.eye(11) - self.winv(Jvtip, W) @ Jvtip) @ (self.lam_perp * np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, np.pi/2 - qdlast[9], 0]))
         self.qd = qdlast + qddot * dt
+        self.qd[7] = np.clip(self.qd[7], self.blade_len_min, self.blade_len_max)
         
         if (self.qd[-1] < 0 and np.linalg.norm(ep(ballpos, ptip)) < 0.1):
             Balls.cycle_first_ball(Balls.gen_random_posvel(10))
