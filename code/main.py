@@ -155,6 +155,10 @@ class Trajectory:
 
             W = np.diag([1, 1, 1, 1, 1, 1, 1, 0.5, 5, 5, 10])
 
+            max_tracking_time = 5.0  # seconds
+            max_tracking_distance = 3.0  # meters
+            distance_to_ball = np.linalg.norm(ball_pos - self.traj_p0)
+
             if not self.tracking:
                 if self.traj_pf is None:
                     self.traj_pf = ball_pos + ball_vel * self.traj_time
@@ -168,7 +172,22 @@ class Trajectory:
                 )
                 if t - self.traj_start >= self.traj_time:
                     self.tracking = True
+                    self.tracking_start_time = t
             else:
+                # Reset tracking if maximum time or distance is exceeded
+                if (
+                    t - self.tracking_start_time
+                ) > max_tracking_time or distance_to_ball > max_tracking_distance:
+                    self.node.get_logger().info(
+                        "Tracking timeout or ball out of range. Resetting trajectory."
+                    )
+                    Balls.cycle_first_ball(Balls.gen_random_posvel(10))
+                    self.tracking = False
+                    self.traj_start = t
+                    self.traj_p0 = self.p0
+                    self.traj_pf = None
+                    return self.evaluate(t, dt)  # Re-evaluate with the next ball
+
                 pos = ball_pos
                 vel = ball_vel
 

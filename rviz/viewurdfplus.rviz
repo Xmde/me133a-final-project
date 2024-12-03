@@ -140,7 +140,7 @@ Visualization Manager:
       Marker Scale: 1
       Name: TF
       Show Arrows: false
-      Show Axes: true
+      Show Axes: false
       Show Names: false
       Tree:
         {}
