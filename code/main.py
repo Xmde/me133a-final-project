@@ -21,6 +21,7 @@ from code.Balls import Balls
 class Trajectory():
     # Initialization.
     def __init__(self, node):
+        self.node = node 
         # Set up the kinematic chain object.
         self.full_chain = KinematicChain(node, 'world', 'lightsaber_blade_end', self.jointnames())
         self.blade_rot_chain = KinematicChain(node, 'world', 'lightsaber_blade_tilt', self.jointnames()[:-1])
@@ -28,7 +29,7 @@ class Trajectory():
         self.q0 = np.array([0, 0, 0, 0, 0, 0, 0, 0.4, np.pi/2, np.pi/2, 0])
         self.p0, self.R0, _, _ = self.full_chain.fkin(self.q0)
 
-        self.qd = self.q0
+        self.qd = self.q0.copy()
         self.lam = 20
         self.angle_lam = 1
         self.lam_perp = 20
@@ -59,55 +60,65 @@ class Trajectory():
 
     @staticmethod
     def compute_angle(vec):
-        return np.array([np.arctan2(-vec[0]/np.cos(np.arcsin(vec[2])), vec[1]/np.cos(np.arcsin(vec[2]))), np.arcsin(vec[2])])
-
+        cos_theta = np.cos(np.arcsin(vec[2]))
+        # Prevent division by zero
+        if np.isclose(cos_theta, 0):
+            cos_theta = np.finfo(float).eps
+        pan = np.arctan2(-vec[0] / cos_theta, vec[1] / cos_theta)
+        tilt = np.arcsin(vec[2])
+        return np.array([pan, tilt])
+    
     # Evaluate at the given time.  This was last called (dt) ago.
     def evaluate(self, t, dt):
-        vel = self.get_balls_info()[0][3:]
-        ballpos = self.get_balls_info()[0][:3]
-        pos = ballpos
-        if (vel == np.zeros(3)).all():
-            vel = np.array([0, -1, 0])
-        dangle = self.compute_angle(vel/-np.linalg.norm(vel))
-        W = np.diag([1, 1, 1, 1, 1, 1, 1, 0.5, 5, 5, 10])
-        
-        if(not self.tracking):
-            if (self.traj_pf is None):
-                self.traj_pf = pos + vel * self.traj_time
-            pos, vel = spline(t - self.traj_start, self.traj_time, self.traj_p0, self.traj_pf, pzero(), vel)
-            if (t - self.traj_start >= self.traj_time):
-                self.tracking = True
-        
-        qdlast = self.qd
-        _, Rrot, _, Jwrot = self.blade_rot_chain.fkin(qdlast[:-1])
-        Jwrot = np.array([[0, 0, 1], [1, 0, 0]]) @ np.hstack((Jwrot, np.zeros((3, 1))))
-        ptip, Rtip, Jvtip, _ = self.full_chain.fkin(qdlast)
-        if (qdlast[7] > self.blade_len_max):
-            Jvtip[:, 7] = np.zeros(3)
-            qdlast[7] = self.blade_len_max
-        if (qdlast[7] < self.blade_len_min):
-            Jvtip[:, 7] = np.zeros(3)
-            qdlast[7] = self.blade_len_min
-        qddot = self.winv(Jwrot, W) @ (self.angle_lam * (dangle - self.compute_angle(Rrot[:, 2])))
-        qddot += (np.eye(11) - self.winv(Jwrot, W) @ Jwrot) @ (self.winv(Jvtip, W) @ (vel + (self.lam * ep(pos, ptip))))
-        qddot += (np.eye(11) - self.winv(Jwrot, W) @ Jwrot) @ (np.eye(11) - self.winv(Jvtip, W) @ Jvtip) @ (self.lam_perp * np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, np.pi/2 - qdlast[9], 0]))
-        self.qd = qdlast + qddot * dt
-        self.qd[7] = np.clip(self.qd[7], self.blade_len_min, self.blade_len_max)
-        
-        if (self.qd[-1] < 0 and np.linalg.norm(ep(ballpos, ptip)) < 0.1):
-            Balls.cycle_first_ball(Balls.gen_random_posvel(10))
-            self.tracking = False
-            self.traj_start = t
-            self.traj_p0 = ptip
-            self.traj_pf = None
-        
-        pd = ptip
-        vd = pzero()
-        Rd = Rtip
-        wd = pzero()
-        
-        # Return the desired joint and task (position/orientation) pos/vel.
-        return (self.qd, qddot, pd, vd, Rd, wd)
+        try: 
+            vel = self.get_balls_info()[0][3:]
+            ballpos = self.get_balls_info()[0][:3]
+            pos = ballpos
+            if (vel == np.zeros(3)).all():
+                vel = np.array([0, -1, 0])
+            dangle = self.compute_angle(vel/-np.linalg.norm(vel))
+            W = np.diag([1, 1, 1, 1, 1, 1, 1, 0.5, 5, 5, 10])
+            
+            if(not self.tracking):
+                if (self.traj_pf is None):
+                    self.traj_pf = pos + vel * self.traj_time
+                pos, vel = spline(t - self.traj_start, self.traj_time, self.traj_p0, self.traj_pf, pzero(), vel)
+                if (t - self.traj_start >= self.traj_time):
+                    self.tracking = True
+            
+            qdlast = self.qd
+            _, Rrot, _, Jwrot = self.blade_rot_chain.fkin(qdlast[:-1])
+            Jwrot = np.array([[0, 0, 1], [1, 0, 0]]) @ np.hstack((Jwrot, np.zeros((3, 1))))
+            ptip, Rtip, Jvtip, _ = self.full_chain.fkin(qdlast)
+            if (qdlast[7] > self.blade_len_max):
+                Jvtip[:, 7] = np.zeros(3)
+                qdlast[7] = self.blade_len_max
+            if (qdlast[7] < self.blade_len_min):
+                Jvtip[:, 7] = np.zeros(3)
+                qdlast[7] = self.blade_len_min
+            qddot = self.winv(Jwrot, W) @ (self.angle_lam * (dangle - self.compute_angle(Rrot[:, 2])))
+            qddot += (np.eye(11) - self.winv(Jwrot, W) @ Jwrot) @ (self.winv(Jvtip, W) @ (vel + (self.lam * ep(pos, ptip))))
+            qddot += (np.eye(11) - self.winv(Jwrot, W) @ Jwrot) @ (np.eye(11) - self.winv(Jvtip, W) @ Jvtip) @ (self.lam_perp * np.array([0, 0, 0, 0, 0, 0, 0, 0, 0, np.pi/2 - qdlast[9], 0]))
+            self.qd = qdlast + qddot * dt
+            self.qd[7] = np.clip(self.qd[7], self.blade_len_min, self.blade_len_max)
+            
+            if (self.qd[-1] < 0 and np.linalg.norm(ep(ballpos, ptip)) < 0.1):
+                Balls.cycle_first_ball(Balls.gen_random_posvel(10))
+                self.tracking = False
+                self.traj_start = t
+                self.traj_p0 = ptip
+                self.traj_pf = None
+            
+            pd = ptip
+            vd = pzero()
+            Rd = Rtip
+            wd = pzero()
+            
+            # Return the desired joint and task (position/orientation) pos/vel.
+            return (self.qd, qddot, pd, vd, Rd, wd)
+        except Exception as e:
+            self.node.get_logger().error(f"Error in evaluating trajectory: {e}")
+            return None  
 
 
 #
