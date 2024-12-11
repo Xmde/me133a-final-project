@@ -10,6 +10,7 @@
 
 import rclpy
 import numpy as np
+import time
 
 from rclpy.node                 import Node
 from rclpy.qos                  import QoSProfile, DurabilityPolicy
@@ -37,15 +38,16 @@ class Balls(Node):
         end_pos = np.array([np.random.uniform(-0.75, 0.75), 0, np.random.uniform(0.25, 1.0)])
         vel = np.array([np.random.uniform(-0.5, 0.5), -0.3, np.random.uniform(-0.05, 0.05)])
         start_pos = end_pos - (offset * vel)
-        return np.concatenate((start_pos, vel))
+        return np.concatenate((start_pos, vel)), time.time() + offset
         
     
     @staticmethod
     # Moves the first ball to the end and then moves it to pos with vel
     def cycle_first_ball(posvel):
         ball = Balls.balls.pop(0)
-        ball['p'] = posvel[:3]
-        ball['v'] = posvel[3:]
+        ball['p'] = posvel[0][:3]
+        ball['v'] = posvel[0][3:]
+        ball['spawn_time'] = posvel[1]
         Balls.balls.append(ball)
         
 
@@ -78,8 +80,9 @@ class Balls(Node):
 
     def add_ball(self, pv):
         ball = {
-            'p': pv[:3],
-            'v': pv[3:],
+            'p': pv[0][:3],
+            'v': pv[0][3:],
+            'spawn_time': pv[1],
             'marker': Marker()
         }
         ball['marker'].header.frame_id  = "world"
@@ -89,7 +92,7 @@ class Balls(Node):
         ball['marker'].id               = len(self.markerarray.markers) + 1
         ball['marker'].type             = Marker.SPHERE
         ball['marker'].pose.orientation = Quaternion()
-        ball['marker'].pose.position    = Point_from_p(pv[:3])
+        ball['marker'].pose.position    = Point_from_p(pv[0][:3])
         ball['marker'].scale            = Vector3(x = 2 * self.radius, y = 2 * self.radius, z = 2 * self.radius)
         ball['marker'].color            = ColorRGBA(r=1.0, g=0.0, b=0.0, a=1.0)
         self.markerarray.markers.append(ball['marker'])

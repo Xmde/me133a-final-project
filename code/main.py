@@ -39,6 +39,7 @@ class Trajectory:
         self.lam = 20
         self.angle_lam = 1
         self.lam_perp = 20
+        self.lam_dist = 100
         self.blade_len_max = 0.75
         self.blade_len_min = 0.05
 
@@ -47,6 +48,7 @@ class Trajectory:
         self.traj_time = 1.5
         self.traj_p0 = self.p0
         self.traj_pf = None
+        self.traj_dangle0 = self.compute_angle(self.R0[:, 2])
 
     def jointnames(self):
         """
@@ -70,7 +72,7 @@ class Trajectory:
         ]
 
     @staticmethod
-    def winv(J, W):
+    def winv(J, W, gamma=1e-3):
         """
         Compute the weighted pseudoinverse of a matrix.
 
@@ -81,7 +83,9 @@ class Trajectory:
         Returns:
             np.ndarray: Weighted pseudoinverse of J.
         """
-        return W @ np.linalg.pinv(J @ W)
+        Jw = J @ W
+        
+        return W @ np.linalg.inv(Jw.T @ Jw + (gamma ** 2) * np.eye(Jw.shape[1])) @ Jw.T
 
     @staticmethod
     def get_balls_info():
@@ -93,6 +97,17 @@ class Trajectory:
         """
         balls = Balls.get_balls()
         return [np.concatenate((ball["p"], ball["v"])) for ball in balls]
+    
+    @staticmethod
+    def get_balls_interval():
+        """
+        Get the time interval for the balls in the scene.
+
+        Returns:
+            float: Time interval for the balls.
+        """
+        balls = Balls.get_balls()
+        return balls[1]["spawn_time"] - balls[0]["spawn_time"]
 
     def compute_angle(self, vec):
         """
@@ -141,6 +156,7 @@ class Trajectory:
             ball_pos = ball_info[:3]
             ball_vel = ball_info[3:]
             ball_vel_norm = np.linalg.norm(ball_vel)
+            # print(f"Interval: {self.get_balls_interval()}")
 
             if np.isclose(ball_vel_norm, 0):
                 self.node.get_logger().info(
@@ -148,10 +164,6 @@ class Trajectory:
                 )
                 ball_vel = np.array([0, -1, 0])
                 ball_vel_norm = np.linalg.norm(ball_vel)
-
-            # Desired angles to align the blade
-            dir_normalized = ball_vel / -ball_vel_norm
-            dangle = self.compute_angle(dir_normalized)
 
             W = np.diag([1, 1, 1, 1, 1, 1, 1, 0.5, 5, 5, 10])
 
@@ -169,6 +181,14 @@ class Trajectory:
                     self.traj_pf,
                     pzero(),
                     ball_vel,
+                )
+                dangle, danglevel = spline(
+                    t - self.traj_start,
+                    self.traj_time,
+                    self.traj_dangle0,
+                    self.compute_angle(ball_vel / -ball_vel_norm),
+                    np.zeros(2),
+                    np.zeros(2),
                 )
                 if t - self.traj_start >= self.traj_time:
                     self.tracking = True
@@ -191,6 +211,9 @@ class Trajectory:
                 pos = ball_pos
                 vel = ball_vel
 
+                dangle = self.compute_angle(ball_vel / -ball_vel_norm)
+                danglevel = np.zeros(2)
+
             qd_last = self.qd.copy()
 
             # Forward kinematics
@@ -200,31 +223,56 @@ class Trajectory:
             )
             ptip, Rtip, Jvtip, _ = self.full_chain.fkin(qd_last)
 
-            # Enforce blade length limits
-            if qd_last[7] > self.blade_len_max or qd_last[7] < self.blade_len_min:
-                Jvtip[:, 7] = np.zeros(3)
-                qd_last[7] = np.clip(qd_last[7], self.blade_len_min, self.blade_len_max)
+            recompute = True
+            while recompute:
+                # Enforce blade length limits (BAD IMPLEMENTATION)
+                # if qd_last[7] > self.blade_len_max or qd_last[7] < self.blade_len_min:
+                #     Jvtip[:, 7] = np.zeros(3)
+                #     qd_last[7] = np.clip(qd_last[7], self.blade_len_min, self.blade_len_max)
+                # if (qd_last[10] < -0.03):
+                #     Jwrot[:, 10] = np.zeros(2)
+                #     Jvtip[:, 10] = np.zeros(3)
+                #     qd_last[10] = -0.03
 
-            # Control laws
-            angle_error = dangle - self.compute_angle(Rrot[:, 2])
-            qddot = self.winv(Jwrot, W) @ (self.angle_lam * angle_error)
+                # Control laws
+                angle_error = dangle - self.compute_angle(Rrot[:, 2])
+                qddot = self.winv(Jwrot, W) @ (danglevel + (self.angle_lam * angle_error))
 
-            null_space_projection = np.eye(11) - self.winv(Jwrot, W) @ Jwrot
-            position_error = vel + (self.lam * ep(pos, ptip))
-            qddot += null_space_projection @ (self.winv(Jvtip, W) @ position_error)
+                null_space_projection = np.eye(11) - self.winv(Jwrot, W) @ Jwrot
+                position_error = vel + (self.lam * ep(pos, ptip))
+                qddot += null_space_projection @ (self.winv(Jvtip, W) @ position_error)
 
-            # Enforce secondary objectives
-            perp_error = self.lam_perp * np.array(
-                [0, 0, 0, 0, 0, 0, 0, 0, 0, np.pi / 2 - qd_last[9], 0]
-            )
-            qddot += (
-                null_space_projection
-                @ (np.eye(11) - self.winv(Jvtip, W) @ Jvtip)
-                @ perp_error
-            )
+                # Enforce secondary objectives
+                sec_error = self.lam_perp * np.array(
+                    [0, 0, 0, 0, 0, 0, 0, 0, 0, np.pi / 2 - qd_last[9], 0]
+                )
+                # sec_error += self.lam_dist * np.array(
+                #     [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, -qd_last[10]]
+                # )
+                qddot += (
+                    null_space_projection
+                    @ (np.eye(11) - self.winv(Jvtip, W) @ Jvtip)
+                    @ sec_error
+                )
 
+                # Enforce joint limits (GOOD IMPLEMENTATION)
+                self.qd = qd_last + qddot * dt
+                recompute = False
+                if self.qd[7] > self.blade_len_max and qddot[7] > 0:
+                    Jwrot[:, 7] = np.zeros(2)
+                    Jvtip[:, 7] = np.zeros(3)
+                    recompute = True
+                if self.qd[7] < self.blade_len_min and qddot[7] < 0:
+                    Jwrot[:, 7] = np.zeros(2)
+                    Jvtip[:, 7] = np.zeros(3)
+                    recompute = True
+                if self.qd[10] < -0.03 and qddot[10] < 0:
+                    Jwrot[:, 10] = np.zeros(2)
+                    Jvtip[:, 10] = np.zeros(3)
+                    recompute = True
+
+            
             # Update joint positions
-            self.qd = qd_last + qddot * dt
             self.qd[7] = np.clip(self.qd[7], self.blade_len_min, self.blade_len_max)
 
             collision_distance = np.linalg.norm(ep(ball_pos, ptip))
@@ -235,11 +283,13 @@ class Trajectory:
                 self.node.get_logger().info(
                     "Collision detected. Cycling and resetting trajectory."
                 )
+                # self.traj_time = self.get_balls_interval() / 2
                 Balls.cycle_first_ball(Balls.gen_random_posvel(10))
                 self.tracking = False
                 self.traj_start = t
                 self.traj_p0 = ptip
                 self.traj_pf = None
+                self.traj_dangle0 = self.compute_angle(Rtip[:, 2])
 
             pd = ptip
             vd = pzero()
@@ -267,10 +317,9 @@ def main(args=None):
     # Trajectory class.
     balls = Balls("balls", UPDATE_RATE)
     # Makes two balls and puts them randomly in the scene.
-    balls.add_ball(Balls.gen_random_posvel(2.5))
-    balls.add_ball(Balls.gen_random_posvel(5))
-    balls.add_ball(Balls.gen_random_posvel(7.5))
-    balls.add_ball(Balls.gen_random_posvel(10))
+    NUM_BALLS = 4
+    for i in range(NUM_BALLS):
+        balls.add_ball(Balls.gen_random_posvel((10.0 / NUM_BALLS) * (i + 1)))
     SPIN_QUEUE.append(balls)
 
     generator = GeneratorNode("generator", UPDATE_RATE, Trajectory)
